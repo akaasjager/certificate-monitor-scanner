@@ -34,7 +34,7 @@ def main(argv):
     return conf
 
 
-def parse_sslscan(output):
+def parse_sslscan(out):
     results = {}
 
     try: subject = re.search('Subject: (.+?)[\n\r]+', out).group(1)
@@ -121,19 +121,37 @@ def parse_sslscan(output):
             results['SAN_URI'] = spl
         except AttributeError: pass
 
+    results['selfsigned'] = (subject == issuer)
+
     return results
 
+
+def sslscan(host, port):
+    p = subprocess.Popen(['sslscan', host], stdout=subprocess.PIPE,
+                                            stderr=subprocess.PIPE)
+    out, err = p.communicate()
+    results = parse_sslscan(out)
+    results['host'] = host
+    results['port'] = port
+    return results
+
+def quotedstr(s):
+    return "\"" + s + "\""
+
+def verdict(results):
+    if results['selfsigned']:
+        print datetime.datetime.now().isoformat()
+        print quotedstr(results['host']) + "," + str(results['port']) + "-" + str(results['selfsigned'])
 
 ##########################
 if __name__ == "__main__":
     conf = main(sys.argv[1:])
+    print conf
 
     if 'inputfile' not in conf:
         print "No inputfile provided"
         help()
         sys.exit(1)
-
-    print conf
 
     i = open(conf['inputfile'], "r")
     csvreader = csv.reader(i)
@@ -143,19 +161,13 @@ if __name__ == "__main__":
         host = row[0]
         port = 443
 
-        host = 'www.kpn.com'
-
-        p = subprocess.Popen(['sslscan', host], stdout=subprocess.PIPE,
-                                                stderr=subprocess.PIPE)
-        out, err = p.communicate()
-        #print out
-
+        results = sslscan(host, port)
         pp = pprint.PrettyPrinter(indent=4)
-        pp.pprint(parse_sslscan(out))
+        pp.pprint(results)
 
+        verdict(results)
 
         break
-
 
 
 """
