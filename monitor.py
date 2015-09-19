@@ -37,6 +37,8 @@ def main(argv):
 def parse_sslscan(out):
     results = {}
 
+    results['output'] = out
+
     try: subject = re.search('Subject: (.+?)[\n\r]+', out).group(1)
     except AttributeError: subject = ''
     results['subject'] = subject
@@ -84,8 +86,16 @@ def parse_sslscan(out):
 
 
     # Parse it
-    results['not_valid_before_dt'] = datetime.datetime.strptime(results['not_valid_before'], "%b %d %H:%M:%S %Y %Z")
-    results['not_valid_after_dt'] = datetime.datetime.strptime(results['not_valid_after'], "%b %d %H:%M:%S %Y %Z")
+    try: results['not_valid_before_dt'] = datetime.datetime.strptime(results['not_valid_before'], "%b %d %H:%M:%S %Y %Z")
+    except ValueError:
+        print "ValueError:", results['not_valid_before']
+        raise
+    try: results['not_valid_after_dt'] = datetime.datetime.strptime(results['not_valid_after'], "%b %d %H:%M:%S %Y %Z")
+    except ValueError:
+        print "ValueError:", results['not_valid_after']
+        raise
+
+    results['valid_for_dt'] = results['not_valid_after_dt'] - datetime.datetime.now()
 
     # Determine validity
     if datetime.datetime.now() > results['not_valid_before_dt'] and datetime.datetime.now() < results['not_valid_after_dt']:
@@ -130,18 +140,43 @@ def sslscan(host, port):
     p = subprocess.Popen(['sslscan', host], stdout=subprocess.PIPE,
                                             stderr=subprocess.PIPE)
     out, err = p.communicate()
-    results = parse_sslscan(out)
-    results['host'] = host
-    results['port'] = port
-    return results
+
+    try:
+        results = parse_sslscan(out)
+        # print out
+        results['host'] = host
+        results['port'] = port
+        return results
+    except:
+        return None
 
 def quotedstr(s):
-    return "\"" + s + "\""
+    return "\"" + str(s) + "\""
+
+def reportstr(results, *args):
+    ret =   quotedstr(datetime.datetime.now().strftime('%Y-%m-%d::%H:%M:%S')) + "," + \
+            quotedstr(results['host']) + "," + \
+            str(results['port'])
+
+    for arg in args:
+        ret += "," + arg
+    return ret
 
 def verdict(results):
-    if results['selfsigned']:
-        print datetime.datetime.now().isoformat()
-        print quotedstr(results['host']) + "," + str(results['port']) + "-" + str(results['selfsigned'])
+    dt_str = datetime.datetime.now().strftime('%Y-%m-%d::%H:%M:%S')
+
+    d = {}
+    d['timestamp'] = dt_str
+    d['host'] = results['host']
+    d['port'] = results['port']
+    d['selfsigned'] = results['selfsigned']
+    d['valid'] = results['valid']
+    d['valid_for_dt'] = results['valid_for_dt']
+    d['valid_for_30_days'] = results['valid_for_dt'] < datetime.timedelta(days=30)
+    d['valid_for_7_days'] = results['valid_for_dt'] < datetime.timedelta(days=7)
+
+    return d
+
 
 ##########################
 if __name__ == "__main__":
@@ -156,18 +191,26 @@ if __name__ == "__main__":
     i = open(conf['inputfile'], "r")
     csvreader = csv.reader(i)
 
+    verdicts = []
     for row in csvreader:
         print ', '.join(row)
         host = row[0]
         port = 443
 
         results = sslscan(host, port)
+        if results is None:
+            print "Error: problem getting results from", host, str(port)
+            continue
+
         pp = pprint.PrettyPrinter(indent=4)
-        pp.pprint(results)
+        #pp.pprint(results)
 
-        verdict(results)
+        #print "------"
+        v = verdict(results)
+        pp.pprint(v)
+        if v['valid_for_7_days'] and v['valid']:
+            break
 
-        break
 
 
 """
